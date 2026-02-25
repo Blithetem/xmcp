@@ -431,4 +431,5 @@ async def main():
         )
 
 if __name__ == "__main__":
+    # 初始化节假日数据
     asyncio.run(main())
