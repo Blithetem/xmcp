@@ -13,6 +13,26 @@ from mcp.server.stdio import stdio_server
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("holiday-query-server")
 
+# 导入工作日查询模块
+HAS_API = False
+api_is_workday = None
+api_get_holiday_data = None
+workday_config = None
+
+try:
+    import workday
+    api_is_workday = workday.is_workday
+    api_get_holiday_data = workday.get_holiday_data
+    workday_config = workday.config
+    HAS_API = True
+    logger.info("成功导入workday模块")
+except ImportError as e:
+    logger.warning(f"无法导入workday模块: {e}")
+except AttributeError as e:
+    logger.warning(f"workday模块缺少必要的属性: {e}")
+except Exception as e:
+    logger.warning(f"导入workday模块时发生未知错误: {e}")
+
 # 创建服务器实例
 server = Server("holiday-query")
 
@@ -42,6 +62,7 @@ class HolidayData:
             # 春节调休（假设需要上班的日期）
             # "2026-02-01": False,  # 周六调休
             # "2026-02-15": False,  # 周日调休
+            "2026-02-28": False,  # 周六调休（春节调休）
             # 清明节
             "2026-04-04": True,
             "2026-04-05": True,
@@ -94,6 +115,28 @@ class HolidayData:
         date_str = date_obj.strftime("%Y-%m-%d")
         year = date_obj.year
         
+        # 优先使用联网查询
+        if HAS_API:
+            try:
+                # 调用API检查是否为工作日
+                is_work_day = api_is_workday(date_obj)
+                weekday = date_obj.weekday()
+                
+                if is_work_day:
+                    # 是工作日
+                    if weekday in [5, 6]:  # 周六=5, 周日=6
+                        return False, "调休（需上班）"
+                    return False, "工作日"
+                else:
+                    # 不是工作日（休息日）
+                    if weekday in [5, 6]:  # 周六=5, 周日=6
+                        return True, "周末"
+                    # 平日但不是工作日，是特殊假期
+                    return True, "休息日"
+            except Exception as e:
+                logger.warning(f"联网查询失败，回退到本地数据: {e}")
+        
+        # 回退到本地数据
         # 检查是否在法定节假日列表中
         if year in self.holidays and date_str in self.holidays[year]:
             is_holiday = self.holidays[year][date_str]
@@ -121,6 +164,28 @@ class HolidayData:
         """
         holidays = []
         
+        # 优先使用联网查询
+        if HAS_API:
+            try:
+                # 调用API获取假期数据
+                holiday_data = api_get_holiday_data(year, workday_config.open_plat, workday_config.center_url, workday_config.app_id, workday_config.app_secret)
+                
+                if holiday_data:
+                    # 生成全年日期并检查每个日期
+                    start_date = date(year, 1, 1)
+                    end_date = date(year, 12, 31)
+                    current_date = start_date
+                    
+                    while current_date <= end_date:
+                        is_holiday, _ = self.is_holiday(current_date)
+                        if is_holiday:
+                            holidays.append(current_date.strftime("%Y-%m-%d"))
+                        current_date += timedelta(days=1)
+                    return holidays
+            except Exception as e:
+                logger.warning(f"联网获取节假日列表失败，回退到本地数据: {e}")
+        
+        # 回退到本地数据
         # 生成全年日期
         start_date = date(year, 1, 1)
         end_date = date(year, 12, 31)

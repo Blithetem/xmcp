@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 import subprocess
-from typing import Any, Sequence
+from typing import Any, Sequence, Optional
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -17,8 +17,25 @@ logger = logging.getLogger("cli-server")
 server = Server("cli")
 
 # PowerShell路径配置
-POWERSHELL_7_PATH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+POWERSHELL_7_PATH = "C:\Program Files\PowerShell\7\pwsh.exe"
 DEFAULT_POWERSHELL_PATH = "powershell.exe"
+
+# 缓存PowerShell路径检测结果
+_cached_powershell_info = None
+
+async def get_powershell_info() -> tuple[str, str]:
+    """获取PowerShell路径和版本信息（缓存结果）
+    
+    Returns:
+        tuple[str, str]: (powershell_path, powershell_version)
+    """
+    global _cached_powershell_info
+    if _cached_powershell_info is None:
+        if os.path.exists(POWERSHELL_7_PATH):
+            _cached_powershell_info = (POWERSHELL_7_PATH, "PowerShell 7")
+        else:
+            _cached_powershell_info = (DEFAULT_POWERSHELL_PATH, "Windows Default PowerShell")
+    return _cached_powershell_info
 
 async def run_command(command: str, timeout: int = 30) -> dict:
     """执行CLI命令
@@ -31,15 +48,15 @@ async def run_command(command: str, timeout: int = 30) -> dict:
         dict: 命令执行结果
     """
     try:
-        # 检测PowerShell 7是否存在
-        if os.path.exists(POWERSHELL_7_PATH):
-            powershell_path = POWERSHELL_7_PATH
-            powershell_version = "PowerShell 7"
-        else:
-            powershell_path = DEFAULT_POWERSHELL_PATH
-            powershell_version = "Windows Default PowerShell"
+        # 获取PowerShell路径和版本信息（使用缓存）
+        powershell_path, powershell_version = await get_powershell_info()
         
-        logger.info(f"使用 {powershell_version} 执行命令: {command}")
+        # 仅在调试级别记录详细命令
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"使用 {powershell_version} 执行命令: {command}")
+        else:
+            # 信息级别仅记录命令类型，不记录具体内容
+            logger.info(f"使用 {powershell_version} 执行命令")
         
         # 执行命令
         process = await asyncio.create_subprocess_exec(
